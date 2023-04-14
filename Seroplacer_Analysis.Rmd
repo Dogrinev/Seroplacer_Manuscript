@@ -1,0 +1,638 @@
+---
+title: "Seroplacer_Manuscript"
+output: html_document
+date: "2023-04-05"
+---
+
+*SET WORKING DIRECTORY HERE*
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Desktop")
+library(ggplot2)
+library(ggtree)
+library(phangorn)
+library(ape)
+library(tidyverse)
+library(treeio)
+load("/Users/dogrinev/Desktop/Fig1_Files.Rdata")
+```
+
+First we prepare the data in order to generate the heatmap. We want to cut down and only focus
+on larger serovars so we trim small serovars first and remove them from analysis. This will clean up the heatmap and also save computational time. 
+
+```{r Figure 1 Preparation}
+Tree_Assemblies2<-Tree_Assemblies2_Heatmap
+FullTestQueries<-FullTestQueries_Heatmap
+Full_16s_Data_Aligned<-Full_16s_Data_Heatmap
+SerovarTable_SE2<-SerovarTable_Heatmap
+vert.tree.SE<-Tree_Heatmap
+
+Cut_Index<-which(Tree_Assemblies2 %in% FullTestQueries)
+Full_16s_Data_Cut<-Full_16s_Data_Aligned[Cut_Index]
+HeatmapTestQueries<-map_chr(.x = 1:1441,.f = ~Full_16s_Data_Cut[[.]][1])
+```
+
+Next we load all of the required functions for the heatmap calculations.
+
+```{r Heatmap Function Loading}
+Super_HAM_Mismatcher<-function(TestSequence,ReferenceSequence)
+{
+  Row1<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[2],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row2<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[3],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row3<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[4],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row4<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[5],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row5<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[6],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row6<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[7],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row7<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[8],exclude = c("n","N","?"),ignore.case = TRUE))
+  Hamming_Table_Result<-rbind(Row1,Row2,Row3,Row4,Row5,Row6,Row7)
+  misms <- apply(cmb, 1, function(ii, dd=Hamming_Table_Result) {
+    sum(dd[1,ii[[1]]], dd[2,ii[[2]]], dd[3,ii[[3]]],
+        dd[4,ii[[4]]], dd[5,ii[[5]]], dd[6,ii[[6]]],
+        dd[7,ii[[7]]])
+  })
+  Best_Order<-as.integer(cmb[which(misms==min(misms))[1],])
+  FirstSeq<-paste(TestSequence[1],TestSequence[2],TestSequence[3],TestSequence[4],TestSequence[5],TestSequence[6],TestSequence[7])
+  RefCut<-ReferenceSequence[2:8]
+  SecondSeq<-paste(RefCut[Best_Order[1]],RefCut[Best_Order[2]],RefCut[Best_Order[3]],RefCut[Best_Order[4]],RefCut[Best_Order[5]],RefCut[Best_Order[6]],RefCut[Best_Order[7]])
+  Diffs<-string.diff(a = FirstSeq,b = SecondSeq,exclude = c("n","N","?"),ignore.case = TRUE)
+  return(Diffs)
+}
+
+Zero_Remover<-function(col)
+{
+  Zero_Index<-which(col==0)[1]
+  newcol<-col[-Zero_Index]
+  return(newcol)
+}
+
+Sero_Full_Averager<-function(Input)
+{
+  TestSero<-Input
+  Sero_Index<-which(ST_Subset$Serovar==TestSero)
+  Sero_Matrix<-map_dfc(.x = Sero_Index,.f = ~unlist(Heatmap_MainList[[.]]))
+  Results<-unlist(map(.x = Seros,.f = ~Sero_Averager(Sero = TestSero,Sero2 = .,Sero_Matrix = Sero_Matrix)))
+  return(Results)
+}
+
+Sero_Averager<-function(Sero,Sero2,Sero_Matrix)
+{
+  if(Sero==Sero2)
+  {
+    Sero_Matrix<-Sero_Matrix
+    Sero_Index2<-which(ST_Subset$Serovar==Sero2)
+    Sero_Matrix2<-Sero_Matrix[Sero_Index2,]
+    Sero_Matrix3<-as.matrix(map_dfc(.x = 1:ncol(Sero_Matrix2),.f = ~Zero_Remover(unlist(as.vector(Sero_Matrix2[,.])))))
+    Means_col<-unlist(map(.x = 1:ncol(Sero_Matrix3),.f = ~mean(Sero_Matrix3[,.])))
+    Final<-mean(Means_col)
+    return(Final)
+  }
+  if(Sero!=Sero2)
+  {
+    Sero_Matrix<-Sero_Matrix
+    Sero_Index2<-which(ST_Subset$Serovar==Sero2)
+    Sero_Matrix2<-as.matrix(Sero_Matrix[Sero_Index2,])
+    Means_col<-unlist(map(.x = 1:ncol(Sero_Matrix2),.f = ~mean(Sero_Matrix2[,.])))
+    Final<-mean(Means_col)
+    return(Final)
+  }
+}
+```
+
+This next section runs the bulk of the calculations. This is the most time consuming step and will not be evaluated as part of this code chunk for time. The generated file will be loaded in the next step, but is calculated with the following lines. 
+
+```{r Main Heatmap Data Calculation, eval=FALSE}
+Heatmap_MainList<-as.list(NULL)
+
+for(i in 1:1441)
+{
+  Index<-HeatmapTestQueries[i]
+  TestSequence<-Full_16s_Data_Cut[[i]][2:8]
+  Test<-map(.x = 1:1441,.f = ~Super_HAM_Mismatcher(TestSequence = TestSequence,ReferenceSequence = Full_16s_Data_Cut[[.]]))
+  Heatmap_MainList[[i]]<-Test
+}
+```
+
+After full nucleotide mismatch calculation, we process the data and reformat for generation of a clean heatmap image. 
+
+```{r Heatmap Data Processing}
+ST_Subset<-SerovarTable_SE2[which(SerovarTable_SE2$Assembly %in% HeatmapTestQueries),]
+Seros<-names(sort(table(ST_Subset$Serovar),decreasing = TRUE))
+
+Heatmap_Data<-as.list(NULL)
+for(i in 1:48)
+{
+  Test<-Seros[i]
+  Heatmap_Data[[i]]<-Sero_Full_Averager(Input = Test)
+}
+
+Heatmap_Vec<-unlist(Heatmap_Data)
+Col1<-unlist(map(.x = Seros,.f = ~rep(.,48)))
+Col2<-rep(Seros,48)
+Heatmap_DF<-as.data.frame(cbind(Heatmap_Vec,Col1,Col2))
+Heatmap_DF$Heatmap_Vec<-as.numeric(Heatmap_DF$Heatmap_Vec)
+Heatmap_DF$Col1<-factor(Heatmap_DF$Col1,levels = Seros)
+Heatmap_DF$Col2<-factor(Heatmap_DF$Col2,levels = Seros)
+```
+
+Figure 1 plot generation. We create the heatmap and analyze the mismatch differences across various serovars. 
+
+```{r Figure 1}
+ggplot(Heatmap_DF, aes(Col1, Col2, fill= Heatmap_Vec)) + 
+  geom_tile()+
+  scale_fill_gradient2(low = "black",mid = "paleturquoise3",high = "paleturquoise1",midpoint = 110,name="Average Mismatches")+
+  theme(axis.title.x = element_blank(),axis.title.y = element_blank(),axis.text.x = element_text(angle = 90,vjust = 0.5, hjust = 1))
+  
+```
+
+Figure 2 Generation - Typhimurium Section
+
+```{r Figure 2 Typhimurium}
+#Locating Typhimurium Clade
+load("/Users/dogrinev/Desktop/Tree.Rdata")
+which(vert.tree.SE_Final$tip.label=="GCA_000213635.1")
+Ancestors(x = vert.tree.SE_Final,node = 249)
+Descendants(x = vert.tree.SE_Final,node = 1642)
+
+Tree_Subset<-unlist(Descendants(x = vert.tree.SE_Final,node = 1642))
+Vec<-1:1565
+Tree_Subset2<-Vec[-Tree_Subset]
+vert.tree.cut<-ape:::drop.tip(phy = vert.tree.SE_Final,tip = Tree_Subset2)
+
+SerovarTable_Cut<-SerovarTable_SE3[which(SerovarTable_SE3$Serovar=="Typhimurium/Monophasic"),]
+
+p <- ggtree(vert.tree.cut,ladderize = TRUE) + 
+  xlim(.0000001, 1)
+
+p %<+% SerovarTable_Cut + 
+  geom_tiplab(aes(fill = factor(Serovar),show.legend=FALSE),
+              color = "black", # color for label font
+              geom = "label",  # labels not text
+              label.padding = unit(0.10, "lines"), # amount of padding around the labels
+              label.size = 0.01)
+```
+
+Figure 3 Kentucky Section
+
+```{Figure 3 Kentucky}
+#Locating Kentucky Clade
+which(vert.tree.SE$tip.label=="GCA_018340485.1")
+Ancestors(x = vert.tree.SE,node = 640)
+Descendants(x = vert.tree.SE,node = 2331)
+#Node 2331 appears to be a good starting point for locating the Kentucky clade.
+
+#Next we trim out tree parts to cut down to visualizing Kentucky only.
+Tree_Subset<-unlist(Descendants(x = vert.tree.SE,node = 2331))
+Vec<-1:1700
+Tree_Subset2<-Vec[-Tree_Subset]
+vert.tree.cut<-ape:::drop.tip(phy = vert.tree.SE,tip = Tree_Subset2)
+Cut<-unlist(Descendants(x = vert.tree.cut,node = 331))
+vert.tree.cut2<-drop.tip(phy = vert.tree.cut,tip = Cut)
+Cut2<-unlist(Descendants(x = vert.tree.cut2,node = 167))
+vert.tree.cut3<-drop.tip(phy = vert.tree.cut2,tip = Cut2)
+
+#Plotting Kentucky Serovar
+SerovarTable_Cut<-SerovarTable_SE2[which(SerovarTable_SE2$Serovar=="Kentucky"),]
+
+p <- ggtree(vert.tree.cut3,ladderize = TRUE) + 
+  xlim(.0000001, 1)
+
+p %<+% SerovarTable_Cut + 
+  geom_tiplab(aes(fill = factor(Serovar),show.legend=FALSE),
+              color = "black", # color for label font
+              geom = "label",  # labels not text
+              label.padding = unit(0.10, "lines"), # amount of padding around the labels
+              label.size = 0.01)
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r Salmonella Prediction Data Analysis, eval=FALSE}
+Run<-FullTestQueries[1:1441]
+
+Super_HAM_Placer2<-function(TestSequence,ReferenceSequence)
+{
+  Row1<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[2],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row2<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[3],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row3<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[4],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row4<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[5],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row5<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[6],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row6<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[7],exclude = c("n","N","?"),ignore.case = TRUE))
+  Row7<-map_int(.x = 1:7,.f = ~string.diff(a = TestSequence[.],b = ReferenceSequence[8],exclude = c("n","N","?"),ignore.case = TRUE))
+  Hamming_Table_Result<-rbind(Row1,Row2,Row3,Row4,Row5,Row6,Row7)
+  misms <- apply(cmb, 1, function(ii, dd=Hamming_Table_Result) {
+    sum(dd[1,ii[[1]]], dd[2,ii[[2]]], dd[3,ii[[3]]],
+        dd[4,ii[[4]]], dd[5,ii[[5]]], dd[6,ii[[6]]],
+        dd[7,ii[[7]]])
+  })
+  Best_Order<-as.integer(cmb[which(misms==min(misms))[1],])
+  return(Best_Order)
+}
+
+string.diff<-function(a,b,exclude=c("n","N","?"),ignore.case=TRUE)
+{
+  a<-toupper(a)
+  b<-toupper(b)
+  diff.a<-unlist(strsplit(a,split=""))
+  diff.b<-unlist(strsplit(b,split=""))
+  diff.d<-rbind(diff.a,diff.b)
+  for(ex.loop in 1:length(exclude))
+  {
+    diff.d<-diff.d[,!(diff.d[1,]==exclude[ex.loop]|diff.d[2,]==exclude[ex.loop])]
+  }
+  differences<-sum(diff.d[1,]!=diff.d[2,])
+  return(differences)
+}
+
+Concatenate_By_Order<-function(Order,RefSequence)
+{
+  Sequence<-RefSequence[2:8]
+  Concatenated_Output<-paste(Sequence[Order[1]],Sequence[Order[2]],Sequence[Order[3]],Sequence[Order[4]],Sequence[Order[5]],Sequence[Order[6]],Sequence[Order[7]],sep = "")
+  return(Concatenated_Output)
+}
+
+library(tidyverse)
+library(dada2)
+library(phylotools)
+
+for(x in Run)
+{
+  system(command = paste("mkdir ~/Placement_Testing_SE/",x,sep = ""))
+  setwd(paste("~/Placement_Testing_SE/",x,sep = ""))
+  Remove_Index<-as.numeric(which(Tree_Assemblies_Final==x))
+  TestSequence<-Full_16s_Data_Aligned_Final[[which(Tree_Assemblies_Final==x)]][2:8]
+  Full_16s_Data_Aligned2<-Full_16s_Data_Aligned_Final[-Remove_Index]
+  Concat_Orders<-map(.x = 1:1564,.f = ~Super_HAM_Placer2(TestSequence = TestSequence,ReferenceSequence = Full_16s_Data_Aligned2[[.]]))
+  Concatenated_References<-map(.x = 1:1564,.f = ~Concatenate_By_Order(Order = Concat_Orders[[.]][1:7],RefSequence = Full_16s_Data_Aligned2[[.]]))
+  Prep_For_FASTA<-as.data.frame(unlist(Concatenated_References))
+  GFFs_Names<-Tree_Assemblies_Final[-Remove_Index]
+  Prep_For_FASTA2<-cbind(GFFs_Names,Prep_For_FASTA)
+  colnames(Prep_For_FASTA2)<-c("seq.name","seq.text")
+  dat2fasta(dat = Prep_For_FASTA2,outfile = paste("~/Placement_Testing_SE/",x,"/concatref.fasta",sep = ""))
+  #References are ready from above
+  #Now prepare query fasta
+  QTestSequence<-Full_16s_Data_Aligned_Final[[which(Tree_Assemblies_Final==x)]][2:8]
+  Query_Prep<-as.data.frame(paste(QTestSequence[1],QTestSequence[2],QTestSequence[3],QTestSequence[4],QTestSequence[5],QTestSequence[6],QTestSequence[7],sep = ""))
+  Query_Prep2<-cbind(x,Query_Prep)
+  colnames(Query_Prep2)<-c("seq.name","seq.text")
+  dat2fasta(dat = Query_Prep2,outfile = paste("~/Placement_Testing_SE/",x,"/query.fasta",sep = ""))
+  #Next prepare tree with test sequence plucked out
+  vert.tree.trimmed<-ape:::drop.tip(phy = vert.tree.SE_Final,tip = x)
+  write.tree(phy = vert.tree.trimmed,file = paste("~/Placement_Testing_SE/",x,"/RAXML.tree.trimmed",sep = ""))
+  #add command to run epa-ng here
+  system(command = paste("~/epa-ng-master/bin/epa-ng --ref-msa ~/Placement_Testing_SE/",x,"/concatref.fasta --tree ~/Placement_Testing_SE/",x,"/RAXML.tree.trimmed --query ~/Placement_Testing_SE/",x,"/query.fasta --model ~/Placement_Testing_SE/info.raxml.bestModel --filter-max 100",sep = ""))
+  system(command = paste("rm concatref.fasta"))
+  system(command = paste("rm RAXML.tree.trimmed"))
+  #end loop
+}
+```
+
+Function Loading Section, used for next analysis.
+
+```{r Function Loading}
+Placement_Node_Selector<-function(Distal_Node,Distal_Length,Tree,Root,Dist_Table)
+{
+  if(Distal_Node == Root)
+  {
+    return(Distal_Node)
+  }
+  else
+  {
+    Proximal_Node<-parent(.data = Tree,.node = Distal_Node)
+    Total_Distance<-Dist_Table[Distal_Node,Proximal_Node]
+    Proximal_Length<-Total_Distance-Distal_Length
+    if(Distal_Length >= Proximal_Length)
+    {
+      return(Proximal_Node)
+    }
+    else
+    {
+      return(Distal_Node)
+    }
+  }
+}
+
+Depth_Calculator<-function(Serovar,Dists,Serovar_Names)
+{
+  Cut_Dists<-as.numeric(Dists[which(Serovar_Names %in% Serovar)])
+  Depth<-max(Cut_Dists)
+  Sum_Branches<-sum(Cut_Dists)
+  Output<-c(Depth,Sum_Branches)
+  return(Output)
+}
+
+Placement_Calculator<-function(SeroName,Placement_Results_DF)
+{
+  DF_Subset<-Placement_Results_DF[which(Placement_Results_DF$Placement_Actuals_Vec==SeroName),]
+  Total_Sero<-length(rownames(DF_Subset))
+  Number_Correct<-length(which(DF_Subset$Placement_Actuals_Vec == DF_Subset$Placement_Finals_Vec))
+  Number_Ind<-length(which(DF_Subset$Placement_Finals_Vec=="Indeterminate"))
+  Number_Wrong<-Total_Sero-Number_Correct-Number_Ind
+  Percent_Correct<-Number_Correct/Total_Sero*100
+  Percent_Ind<-Number_Ind/Total_Sero*100
+  Percent_Wrong<-Number_Wrong/Total_Sero*100
+  Results<-data.frame(SeroName,Total_Sero,Percent_Correct,Percent_Ind,Percent_Wrong)
+  return(Results)
+}
+
+Clade_Hit_Finder<-function(Original,Pendant_Multi)
+{
+  x<-Original
+  setwd(paste("~/Desktop/Database_Rebuild/Placement_Testing_SE/",x,sep=""))
+  JPlace<-read.jplace("epa_result.jplace")
+  vert.tree.trimmed<-ape:::drop.tip(phy = vert.tree.SE,tip = x)
+  vert.tree<-vert.tree.trimmed
+  PlacedEdges<-JPlace@placements$node
+  Node_Distances<-dist.nodes(x = vert.tree)
+  PlacedEdges_List<-map(.x = 1:length(PlacedEdges),.f = ~Placement_Node_Selector(Distal_Node = PlacedEdges[.],Distal_Length = JPlace@placements$distal_length[.],Tree = vert.tree,Root = rootnode(vert.tree),Dist_Table = Node_Distances))
+  PlacedEdges_Corrected<-unlist(PlacedEdges_List)
+  All_Descendants<-map(.x = PlacedEdges_Corrected,.f = ~Descendants(x = vert.tree,node = .))
+  All_Descendants_Vec<-unlist(All_Descendants)
+  TipNumbersOI_Filtered<-unique(All_Descendants_Vec)
+  TipNamesOI_Filtered<-vert.tree$tip.label[TipNumbersOI_Filtered]
+  TipNumbersOI_OriginalTree<-which(vert.tree.SE$tip.label %in% TipNamesOI_Filtered)
+  Edge.Table<-cbind(vert.tree.SE$edge,vert.tree.SE$edge.length)
+  Ancestor_List<-map(.x = TipNumbersOI_OriginalTree,.f = ~unlist(Ancestors(vert.tree.SE,node = .)))
+  Sum_List<-as.list(NULL)
+  for(j in 1:length(Ancestor_List[[1]]))
+  {
+    Test_Vec<-map_int(.x = Ancestor_List,.f = ~match(Ancestor_List[[1]][j],.))
+    Sum_List[[j]]<-Test_Vec
+  }
+  Result_Vec<-map_int(.x = Sum_List,.f = ~sum(.))
+  Result_Vec_NoNA<-Result_Vec[!is.na(Result_Vec)]
+  Target_Value<-min(Result_Vec_NoNA)
+  Closest_Parent_Node<-Ancestor_List[[1]][which(Result_Vec==Target_Value)]
+  Root_Node<-rootnode(vert.tree.SE)
+  if(Closest_Parent_Node == Root_Node)
+  {
+    MRCA<-Closest_Parent_Node
+    return(MRCA)
+  }
+  if(Closest_Parent_Node != Root_Node)
+  {
+    Potential_Ancestors<-Ancestors(x = vert.tree.SE,node = Closest_Parent_Node)
+    Potential_Ancestors_Final<-c(Closest_Parent_Node,Potential_Ancestors)
+    Edge_Scores<-Edge.Table[which(Edge.Table[,2] %in% Potential_Ancestors_Final),]
+    if(class(Edge_Scores)[1]=="numeric")
+    {
+      Edge_Scores<-t(as.data.frame(Edge_Scores))
+      Pendant<-max(JPlace@placements$pendant_length)
+      Branch_Sums<-map(.x = 1:length(Edge_Scores[,3]),.f = ~sum(Edge_Scores[.:length(Edge_Scores[,3]),3]))
+      Branch_Sums_Vec<-unlist(Branch_Sums)
+      MRCA<-Edge_Scores[which(abs(Branch_Sums_Vec-Pendant*Pendant_Multi)==min(abs(Branch_Sums_Vec-Pendant*Pendant_Multi))),2]
+      return(MRCA)
+    }
+    if(class(Edge_Scores)[1]!="numeric")
+    {
+      Pendant<-max(JPlace@placements$pendant_length)
+      Branch_Sums<-map(.x = 1:length(Edge_Scores[,3]),.f = ~sum(Edge_Scores[.:length(Edge_Scores[,3]),3]))
+      Branch_Sums_Vec<-unlist(Branch_Sums)
+      MRCA<-Edge_Scores[which(abs(Branch_Sums_Vec-Pendant*Pendant_Multi)==min(abs(Branch_Sums_Vec-Pendant*Pendant_Multi))),2]
+      return(MRCA)
+    }
+  }
+}
+
+Placement_Method_Evaluator<-function(Number)
+{
+  PlacementMappingData_MRCAs_Pendant_New<-map(.x = FullTestQueries,.f = ~Clade_Hit_Finder(Original = .x,Pendant_Multi = Number))
+  Placement_Accuracy<-map(.x = 1:1441,.f = ~Clade_Accuracy(MRCA = PlacementMappingData_MRCAs_Pendant_New[[.]],Original = FullTestQueries[.]))
+  Placement_Accuracy_DF<-as.data.frame(matrix(unlist(Placement_Accuracy), ncol = 2, byrow = TRUE))
+  Placement_Summary<-mean(Placement_Accuracy_DF$V2)
+  Placement_Checker<-map(.x = 1:1441,.f = ~Clade_Checker(MRCA = PlacementMappingData_MRCAs_Pendant_New[[.]],Original = FullTestQueries[.]))
+  Placement_Checker_DF<-as.data.frame(matrix(unlist(Placement_Checker), ncol = 2, byrow = TRUE))
+  Originals_Found<-length(which(Placement_Checker_DF$V1==6))/1441
+  Result<-c(Number,Placement_Summary,Originals_Found)
+  return(Result)
+}
+
+Clade_Accuracy<-function(MRCA,Original)
+{
+  Descendant_List<-Descendants(x = vert.tree.SE,node = MRCA)
+  Descendants_Vec<-unlist(Descendant_List)
+  Descendant_Assemblies<-vert.tree.SE$tip.label[Descendants_Vec]
+  Original_Serovar<-SerovarTable_SE2[which(SerovarTable_SE2$Assembly %in% Original),2]
+  Descendant_Serovars<-SerovarTable_SE2[which(SerovarTable_SE2$Assembly %in% Descendant_Assemblies),2]
+  Descendant_Serovars_NoNA<-Descendant_Serovars[which(Descendant_Serovars!="")]
+  Correct_Seros<-which(Descendant_Serovars_NoNA %in% Original_Serovar)
+  Fraction_Total_Seros<-length(Correct_Seros)/length(Descendant_Serovars_NoNA)
+  Fraction_Total_Seros[is.na(Fraction_Total_Seros)]<-0
+  Node_Distances<-dist.nodes(vert.tree.SE)
+  Depth_Range<-Node_Distances[MRCA,Descendants_Vec]
+  Depth<-max(Depth_Range)
+  Final_Result<-c(-log10(Depth),Fraction_Total_Seros)
+  return(Final_Result)
+}
+
+Clade_Checker<-function(MRCA,Original)
+{
+  Descendant_List<-Descendants(x = vert.tree.SE,node = MRCA)
+  Original_Node<-which(vert.tree.SE$tip.label==Original)
+  
+  if(Original_Node %in% Descendant_List[[1]] == TRUE)
+  {
+    Output<-c(6,length(Descendant_List[[1]]))
+    return(Output)
+  }
+  
+  if(Original_Node %in% Descendant_List[[1]] == FALSE)
+  {
+    Node_Distances<-dist.nodes(x = vert.tree.SE)
+    Descendant_Distances<-Node_Distances[Original_Node,Descendant_List[[1]]]
+    Output<-c(-log10(min(Descendant_Distances)),length(Descendant_List[[1]]))
+    return(Output)
+  }
+}
+```
+
+Determine MRCAs - These are calculated from the placement JSON files. 
+
+```{r MRCA Calculation, eval=FALSE}
+Original_Node_Distances<-dist.nodes(vert.tree.SE)
+Placement_MRCAs<-as.list(NULL)
+
+for(i in 1:1441)
+{
+  x<-FullTestQueries[i]
+  setwd(paste("~/Desktop/Database_Rebuild/Placement_Testing_SE/",x,sep=""))
+  JPlace<-read.jplace("epa_result.jplace")
+  vert.tree.trimmed<-ape:::drop.tip(phy = vert.tree.SE,tip = x)
+  vert.tree<-vert.tree.trimmed
+  PlacedEdges<-JPlace@placements$node
+  Node_Distances<-dist.nodes(x = vert.tree)
+  PlacedEdges_List<-map(.x = 1:length(PlacedEdges),.f = ~Placement_Node_Selector(Distal_Node = PlacedEdges[.],Distal_Length = JPlace@placements$distal_length[.],Tree = vert.tree,Root = rootnode(vert.tree),Dist_Table = Node_Distances))
+  PlacedEdges_Corrected<-unlist(PlacedEdges_List)
+  All_Descendants<-map(.x = PlacedEdges_Corrected,.f = ~Descendants(x = vert.tree,node = .))
+  All_Descendants_Vec<-unlist(All_Descendants)
+  TipNumbersOI_Filtered<-unique(All_Descendants_Vec)
+  Edge.Table<-cbind(vert.tree$edge,vert.tree$edge.length)
+  Ancestor_List<-map(.x = TipNumbersOI_Filtered,.f = ~unlist(Ancestors(vert.tree,node = .)))
+  Sum_List<-as.list(NULL)
+  for(j in 1:length(Ancestor_List[[1]]))
+  {
+    Test_Vec<-map_int(.x = Ancestor_List,.f = ~match(Ancestor_List[[1]][j],.))
+    Sum_List[[j]]<-Test_Vec
+  }
+  Result_Vec<-map_int(.x = Sum_List,.f = ~sum(.))
+  Result_Vec_NoNA<-Result_Vec[!is.na(Result_Vec)]
+  Target_Value<-min(Result_Vec_NoNA)
+  Closest_Parent_Node<-Ancestor_List[[1]][which(Result_Vec==Target_Value)]
+  Root_Node<-rootnode(vert.tree)
+  if(Closest_Parent_Node == Root_Node)
+  {
+    MRCA<-Closest_Parent_Node
+    Placement_MRCAs[[i]]<-MRCA
+  }
+  if(Closest_Parent_Node != Root_Node)
+  {
+    Pendant_Multi<-1.5
+    Potential_Ancestors<-Ancestors(x = vert.tree,node = Closest_Parent_Node)
+    Potential_Ancestors_Final<-c(Closest_Parent_Node,Potential_Ancestors)
+    Edge_Scores<-Edge.Table[which(Edge.Table[,2] %in% Potential_Ancestors_Final),]
+    if(class(Edge_Scores)[1]=="numeric")
+    {
+      Edge_Scores<-t(as.data.frame(Edge_Scores))
+      Pendant<-max(JPlace@placements$pendant_length)
+      Branch_Sums<-map(.x = 1:length(Edge_Scores[,3]),.f = ~sum(Edge_Scores[.:length(Edge_Scores[,3]),3]))
+      Branch_Sums_Vec<-unlist(Branch_Sums)
+      MRCA<-Edge_Scores[which(abs(Branch_Sums_Vec-Pendant*Pendant_Multi)==min(abs(Branch_Sums_Vec-Pendant*Pendant_Multi))),2]
+      Placement_MRCAs[[i]]<-MRCA
+    }
+    if(class(Edge_Scores)[1]!="numeric")
+    {
+      Pendant<-max(JPlace@placements$pendant_length)
+      Branch_Sums<-map(.x = 1:length(Edge_Scores[,3]),.f = ~sum(Edge_Scores[.:length(Edge_Scores[,3]),3]))
+      Branch_Sums_Vec<-unlist(Branch_Sums)
+      MRCA<-Edge_Scores[which(abs(Branch_Sums_Vec-Pendant*Pendant_Multi)==min(abs(Branch_Sums_Vec-Pendant*Pendant_Multi))),2]
+      Placement_MRCAs[[i]]<-MRCA
+    }
+  }
+}
+```
+
+Calculation of our predictions and the actual results.
+
+```{r Prediction and Results Calculation}
+load("/Users/dogrinev/Desktop/Fig4_Files.Rdata")
+
+Original_Node_Distances<-dist.nodes(vert.tree.SE)
+
+Placement_Predictions<-as.list(NULL)
+Placement_Finals<-as.list(NULL)
+
+for(i in 1:1441)
+{
+  x<-FullTestQueries[i]
+  vert.tree.trimmed<-ape:::drop.tip(phy = vert.tree.SE,tip = x)
+  MRCA<-Placement_MRCAs[[i]]
+  Tree<-vert.tree.trimmed
+  Descendant_List<-Descendants(x = Tree,node = MRCA)
+  Descendants_Vec<-unlist(Descendant_List)
+  Descendant_Assemblies<-Tree$tip.label[Descendants_Vec]
+  GTD_Sero_Predict_Clean2<-SerovarTable_SE
+  Descendant_Serovars<-GTD_Sero_Predict_Clean2[which(GTD_Sero_Predict_Clean2$Assembly %in% Descendant_Assemblies),2]
+  Descendant_Serovars_NoNA<-Descendant_Serovars[which(Descendant_Serovars!="")]
+  Serovar_Report<-names(table(Descendant_Serovars_NoNA))
+  Sero_Percentages<-unlist(map(.x = Serovar_Report,.f = ~length(which(Descendant_Serovars %in% .))/length(Descendant_Serovars)))
+  Sero_Numbers<-unlist(map(.x = Serovar_Report,.f = ~length(which(Descendant_Serovars %in% .))))
+  Node_Distances<-dist.nodes(Tree)
+  Distances<-Node_Distances[MRCA,Descendants_Vec]
+  Depth_Results<-map(.x = Serovar_Report,.f = ~Depth_Calculator(Serovar = .,Dists = Distances,Serovar_Names = Descendant_Serovars))
+  Depth_Results_Cols<-data.frame(t(matrix(unlist(Depth_Results),nrow=2)))
+  Sero_Table<-as.data.frame(cbind(Serovar_Report,Sero_Percentages,Sero_Numbers,Depth_Results_Cols))
+  colnames(Sero_Table)<-c("Serovar","Fraction","Matches in Final Clade","Maximum Depth","Sum of Branch Lengths")
+  Sero_Table_Sorted <- Sero_Table[order(Sero_Table$Fraction,decreasing = TRUE),]
+  Sero_Table_Sorted$Fraction<-as.numeric(Sero_Table_Sorted$Fraction)
+  Sero_Table_Sorted$Fraction<-Sero_Table_Sorted$Fraction*100
+  if(sum(Sero_Table_Sorted[,3]) > 500)
+  {
+    Placement_Predictions[[i]]<-Sero_Table_Sorted
+    Placement_Finals[[i]]<-"Indeterminate"
+  }
+  if(sum(Sero_Table_Sorted[,3]) < 500)
+  {
+    Placement_Predictions[[i]]<-Sero_Table_Sorted
+    if(Sero_Table_Sorted[1,2] >= 50)
+    {
+      Placement_Finals[[i]]<-Sero_Table_Sorted[1,1]
+    }
+    if(Sero_Table_Sorted[1,2] < 50)
+    {
+      Placement_Finals[[i]]<-"Indeterminate"
+    }
+  }
+}
+
+Placement_Actuals<-as.list(NULL)
+for(i in 1:1441)
+{
+  Query<-FullTestQueries[i]
+  QuerySero<-SerovarTable_SE2[which(SerovarTable_SE2$Assembly==Query),2]
+  Placement_Actuals[[i]]<-QuerySero
+}
+```
+
+
+Placement results evaluator section, the computational step here is quite slow so this code chunk will not be evaluated. If desired, it can be re-run using the following lines. 
+
+```{r Placement Evaluator, eval=FALSE}
+Pendant_Range<-c(0.001,0.025,0.05,0.01,0.25,0.5,0.75,1,1.25,1.3,1.35,1.45,1.5,1.55,1.6,1.65,1.7,1.75,2,3,4,6,8)
+Evaluator_Results<-map(.x = Pendant_Range,.f = ~Placement_Method_Evaluator(.))
+```
+
+Generation of results summary (Figure 4)
+
+```{r Figure 4 Generation}
+Placement_Actuals_Vec<-unlist(Placement_Actuals)
+Placement_Finals_Vec<-unlist(Placement_Finals)
+Placement_Results_DF<-as.data.frame(cbind(Placement_Actuals_Vec,Placement_Finals_Vec))
+
+load("/Users/dogrinev/Desktop/Fig4_Files.Rdata")
+Evaluator_Results_DF<-as.data.frame(matrix(unlist(Evaluator_Results), ncol = 3, byrow = TRUE))
+colnames(Evaluator_Results_DF)<-c("Pendant_Multi","Serovar_Percentage","OQ_Percentage")
+
+Evaluator_Results_DF_Trim<-Evaluator_Results_DF[-c(9,11,12,14,16,18),]
+
+#no color version
+ggplot(Evaluator_Results_DF_Trim, aes(x=OQ_Percentage, y=Serovar_Percentage,label=Pendant_Multi)) +
+  geom_text(vjust=(-1),size=3)+
+  geom_point()+
+  ggtitle("Summary Statistics of Salmonella Algorithm Performance")+
+  xlab("Fraction of Correct Phylogenetic Origins")+
+  ylab("Serovar Accuracy")
+```
+
+Visualization of Full Salmonella Results
+
+```{r Figure 5}
+
+Data_Vec<-rep(1,1441)
+Data_Vec[which(Placement_Finals_Vec=="Indeterminate")]<-"Indeterminate"
+Data_Vec[which(Placement_Finals_Vec==Placement_Actuals_Vec)]<-"Correct"
+Data_Vec[which(Data_Vec==1)]<-"Incorrect"
+SE_Serovar_Results_Data_Table<-as.data.frame(cbind(FullTestQueries,Placement_Actuals_Vec,Data_Vec))
+colnames(SE_Serovar_Results_Data_Table)<-c("Assemblies","Serovars","Results")
+
+#Nice barplot:
+serosize<-names(sort(table(SerovarTable_SE$Serovar),decreasing = TRUE))
+SE_Serovar_Results_Data_Table %>%
+  mutate(Serovars=factor(Serovars, levels = rev(serosize)), # make serovars a factor for ordering on plot
+         Results=factor(Results, levels=c("Indeterminate", "Incorrect", "Correct"))) %>% # convert to factor for ordering
+  count(Serovars, Results) %>%
+  with_groups(c(Serovars), mutate, p=n/sum(n)) %>% # calculate proportions
+  ggplot(aes(x=Serovars, y=p, fill=Results)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(breaks = seq(0,1,0.25), labels=c("0", "0.25", "0.5", "0.75", "1")) +
+  scale_fill_manual(breaks=c("Correct", "Incorrect", "Indeterminate"), values = c("palegreen2", "indianred1", "gray75")) + #reorder colors
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 5.5),
+        panel.grid = element_blank(), # remove grid lines behind bars
+        legend.position = "top") +
+  labs(y="Proportion")
+```
+
