@@ -8,7 +8,7 @@ The full reproducible analysis can be found in a pre-rendered HTML file availabl
 
 Directory of Relevant Manuscript Files
 
-* [Seroplacer Analysis of Salmonella Test Data](https://dogrinev.github.io/Seroplacer_Reproducible_Analysis).
+* [Seroplacer Analysis of Salmonella Test Data](https://dogrinev.github.io/Seroplacer_Reproducible_Analysis.html).
 * [Seroplacer Analysis of E. coli Test Data](https://dogrinev.github.io/Seroplacer_Reproducible_Analysis_Ecoli.html).
 * [Analysis of Isolate and Environmental Sample Data]
 * [Salmonella Database Construction (R Scripts)](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Database_Construction_Salmonella.R)
