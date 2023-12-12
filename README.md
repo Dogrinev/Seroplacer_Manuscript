@@ -14,5 +14,5 @@ Directory of Relevant Manuscript Files
 * [Salmonella Database Construction (R Scripts)](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Database_Construction_Salmonella.R)
 * [E. coli Database Construction (R Scripts)](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Database_Construction_Ecoli.R)
 
-Dmitry Grinevich (dogrinev@ncsu.edu)
+Dmitry Grinevich (dogrinev@gmail.com)
 
