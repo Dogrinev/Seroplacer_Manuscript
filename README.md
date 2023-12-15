@@ -13,6 +13,7 @@ Directory of Relevant Manuscript Files
 * [Analysis of Isolate and Environmental Sample Data](https://dogrinev.github.io/Seroplacer_Isolate_Environmental_Analysis.html).
 * [Salmonella Database Construction (R Scripts)](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Database_Construction_Salmonella.R)
 * [E. coli Database Construction (R Scripts)](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Database_Construction_Ecoli.R)
+* [Full Salmonella and E. coli Aligned FASTA Files](https://github.com/Dogrinev/Seroplacer_Manuscript/blob/main/Full_FASTAs.zip)
 
 Dmitry Grinevich (dogrinev@gmail.com)
 
